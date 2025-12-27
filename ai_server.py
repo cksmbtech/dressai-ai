@@ -9,11 +9,11 @@ import os
 app = FastAPI()
 
 # =========================
-# CORS (VERY IMPORTANT)
+# CORS CONFIG
 # =========================
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],   # you can restrict later
+    allow_origins=["*"],   # tighten later if needed
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -22,10 +22,10 @@ app.add_middleware(
 # =========================
 # ENV VARIABLES
 # =========================
-STABLE_HORDE_API_KEY = os.getenv("STABLE_HORDE_API_KEY")
+STABLE_HORDE_API_KEY = os.getenv("STABLE_HORDE_API_KEY", "").strip()
 
-if not STABLE_HORDE_API_KEY:
-    print("⚠️ WARNING: STABLE_HORDE_API_KEY not set")
+print("DEBUG HORDE KEY PRESENT:", bool(STABLE_HORDE_API_KEY))
+print("DEBUG HORDE KEY LENGTH:", len(STABLE_HORDE_API_KEY))
 
 HORDE_HEADERS = {
     "apikey": STABLE_HORDE_API_KEY,
@@ -46,22 +46,26 @@ def health():
 @app.post("/generate")
 async def generate_image(file: UploadFile = File(...)):
     try:
+        # Read image
         image_bytes = await file.read()
         image_b64 = base64.b64encode(image_bytes).decode("utf-8")
 
-        # 🔥 PROMPT (BEAUTIFUL FACE + BODY)
+        # =========================
+        # PROMPT (BEAUTIFUL FACE + BODY)
+        # =========================
         prompt = (
             "A beautiful South Indian woman fashion model wearing an elegant saree, "
-            "graceful posture, symmetrical attractive face, clear smooth skin, "
-            "natural expression, studio fashion photography, professional lighting, "
-            "high realism, detailed fabric texture, accurate saree draping, "
-            "photorealistic, catalog quality, ultra high detail"
+            "graceful posture, symmetrical attractive face, clear smooth glowing skin, "
+            "soft feminine facial features, pleasant expression, "
+            "professional studio fashion photography, beauty lighting, "
+            "high realism, ultra-detailed fabric texture, "
+            "accurate saree draping, catalog quality, photorealistic"
         )
 
         negative_prompt = (
             "ugly face, deformed face, bad anatomy, extra limbs, extra fingers, "
-            "crooked eyes, distorted face, blurry, low quality, cartoon, anime, "
-            "overexposed, underexposed, bad hands, bad proportions"
+            "crooked eyes, distorted facial features, blurry, low resolution, "
+            "cartoon, anime, unrealistic, bad hands, bad body proportions"
         )
 
         payload = {
@@ -103,7 +107,7 @@ async def generate_image(file: UploadFile = File(...)):
         # =========================
         # POLL RESULT
         # =========================
-        for _ in range(30):
+        for _ in range(30):  # ~150 seconds max
             time.sleep(5)
 
             check = requests.get(
