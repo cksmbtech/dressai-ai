@@ -1,4 +1,4 @@
-from fastapi import FastAPI, File, UploadFile
+from fastapi import FastAPI, File, UploadFile, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 import requests
@@ -13,7 +13,7 @@ app = FastAPI()
 # =========================
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # restrict later
+    allow_origins=["*"],  # tighten later
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -23,9 +23,6 @@ app.add_middleware(
 # ENV VARIABLES
 # =========================
 STABLE_HORDE_API_KEY = os.getenv("STABLE_HORDE_API_KEY", "").strip()
-
-print("DEBUG HORDE KEY PRESENT:", bool(STABLE_HORDE_API_KEY))
-print("DEBUG HORDE KEY LENGTH:", len(STABLE_HORDE_API_KEY))
 
 HORDE_HEADERS = {
     "apikey": STABLE_HORDE_API_KEY,
@@ -41,10 +38,33 @@ def health():
     return {"status": "ok"}
 
 # =========================
+# PROMPT HELPERS
+# =========================
+def age_prompt(age_group: str) -> str:
+    return {
+        "Kids (5–12)": "young child model",
+        "Teens (13–19)": "teenage fashion model",
+        "20–30": "young adult fashion model",
+        "30–45": "adult fashion model",
+        "45+": "mature elegant fashion model"
+    }.get(age_group, "adult fashion model")
+
+def gender_prompt(gender: str) -> str:
+    return {
+        "Female": "female",
+        "Male": "male",
+        "Unisex": "androgynous"
+    }.get(gender, "female")
+
+# =========================
 # AI GENERATION ENDPOINT
 # =========================
 @app.post("/generate")
-async def generate_image(file: UploadFile = File(...)):
+async def generate_image(
+    file: UploadFile = File(...),
+    age_group: str = Form("20–30"),
+    gender: str = Form("Female")
+):
     try:
         # -------------------------
         # Read uploaded image
@@ -52,34 +72,37 @@ async def generate_image(file: UploadFile = File(...)):
         image_bytes = await file.read()
         image_b64 = base64.b64encode(image_bytes).decode("utf-8")
 
+        age_desc = age_prompt(age_group)
+        gender_desc = gender_prompt(gender)
+
         # -------------------------
-        # PROMPT (REALISTIC, BEAUTIFUL)
+        # PROMPT (MATCH INPUT IMAGE)
         # -------------------------
         prompt = (
-            "Ultra realistic South Indian female fashion model wearing a silk saree "
-            "matching the uploaded reference image in color, fabric texture and border design. "
-            "Natural beautiful face, symmetrical facial features, smooth realistic skin, "
-            "elegant posture, accurate human body proportions. "
-            "Professional studio fashion photography, DSLR photo, soft diffused lighting, "
-            "catalog quality, shallow depth of field, photorealistic, "
-            "highly detailed silk fabric folds, realistic saree draping, no artificial look."
+            f"Ultra realistic South Indian {gender_desc} {age_desc} "
+            f"wearing a silk saree exactly matching the uploaded reference image. "
+            f"Accurate saree color, border design, fabric texture, weave pattern, "
+            f"and traditional draping style. "
+            f"Beautiful symmetrical face, natural skin texture, soft facial expression, "
+            f"realistic hands, arms, body proportions. "
+            f"Professional studio fashion photography, DSLR quality, "
+            f"soft diffused lighting, shallow depth of field, "
+            f"catalog fashion shoot, photorealistic, no artificial look."
         )
 
         negative_prompt = (
-            "ugly face, distorted face, asymmetrical face, fake skin, doll-like, plastic skin, "
-            "cgi, cartoon, anime, illustration, painting, unreal lighting, "
-            "bad anatomy, extra fingers, extra limbs, deformed body, "
+            "ugly face, distorted face, asymmetrical face, deformed features, "
+            "fake skin, plastic skin, doll-like, cgi, cartoon, anime, illustration, "
+            "painting, unrealistic lighting, bad anatomy, extra limbs, "
+            "extra fingers, missing fingers, malformed hands, "
             "blurry, low resolution, low quality"
         )
 
-        # -------------------------
-        # Stable Horde payload
-        # -------------------------
         payload = {
             "prompt": prompt,
             "params": {
                 "sampler_name": "k_euler",
-                "steps": 20,
+                "steps": 22,
                 "cfg_scale": 7,
                 "width": 512,
                 "height": 768,
@@ -91,7 +114,7 @@ async def generate_image(file: UploadFile = File(...)):
         }
 
         # -------------------------
-        # Submit job
+        # SUBMIT TO STABLE HORDE
         # -------------------------
         submit = requests.post(
             "https://stablehorde.net/api/v2/generate/async",
@@ -112,9 +135,9 @@ async def generate_image(file: UploadFile = File(...)):
         request_id = submit.json()["id"]
 
         # -------------------------
-        # Poll result
+        # POLL RESULT
         # -------------------------
-        for _ in range(30):  # ~150 sec max
+        for _ in range(30):  # ~150 sec
             time.sleep(5)
 
             check = requests.get(
