@@ -13,7 +13,7 @@ app = FastAPI()
 # =========================
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],   # tighten later if needed
+    allow_origins=["*"],  # restrict later
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -46,28 +46,35 @@ def health():
 @app.post("/generate")
 async def generate_image(file: UploadFile = File(...)):
     try:
-        # Read image
+        # -------------------------
+        # Read uploaded image
+        # -------------------------
         image_bytes = await file.read()
         image_b64 = base64.b64encode(image_bytes).decode("utf-8")
 
-        # =========================
-        # PROMPT (BEAUTIFUL FACE + BODY)
-        # =========================
+        # -------------------------
+        # PROMPT (REALISTIC, BEAUTIFUL)
+        # -------------------------
         prompt = (
-              "Ultra realistic South Indian female fashion model wearing a silk saree "
-              "matching the uploaded reference image in color, fabric texture and border design. "
-              "Natural beautiful face, symmetrical features, smooth skin, elegant posture, "
-              "real human proportions, studio catalog photography, professional soft lighting, "
-              "DSLR photo, shallow depth of field, high fashion editorial style, "
-              "photorealistic, extremely detailed fabric folds, no artificial look"
-            )
-            
-            negative_prompt = (
-              "ugly face, distorted face, fake skin, doll-like, plastic skin, "
-              "anime, cartoon, illustration, cgi, unreal lighting, bad anatomy, "
-              "extra fingers, deformed body, blur, low quality, painting"
-            )
+            "Ultra realistic South Indian female fashion model wearing a silk saree "
+            "matching the uploaded reference image in color, fabric texture and border design. "
+            "Natural beautiful face, symmetrical facial features, smooth realistic skin, "
+            "elegant posture, accurate human body proportions. "
+            "Professional studio fashion photography, DSLR photo, soft diffused lighting, "
+            "catalog quality, shallow depth of field, photorealistic, "
+            "highly detailed silk fabric folds, realistic saree draping, no artificial look."
+        )
 
+        negative_prompt = (
+            "ugly face, distorted face, asymmetrical face, fake skin, doll-like, plastic skin, "
+            "cgi, cartoon, anime, illustration, painting, unreal lighting, "
+            "bad anatomy, extra fingers, extra limbs, deformed body, "
+            "blurry, low resolution, low quality"
+        )
+
+        # -------------------------
+        # Stable Horde payload
+        # -------------------------
         payload = {
             "prompt": prompt,
             "params": {
@@ -83,9 +90,9 @@ async def generate_image(file: UploadFile = File(...)):
             "source_image": image_b64
         }
 
-        # =========================
-        # SUBMIT TO STABLE HORDE
-        # =========================
+        # -------------------------
+        # Submit job
+        # -------------------------
         submit = requests.post(
             "https://stablehorde.net/api/v2/generate/async",
             headers=HORDE_HEADERS,
@@ -104,10 +111,10 @@ async def generate_image(file: UploadFile = File(...)):
 
         request_id = submit.json()["id"]
 
-        # =========================
-        # POLL RESULT
-        # =========================
-        for _ in range(30):  # ~150 seconds max
+        # -------------------------
+        # Poll result
+        # -------------------------
+        for _ in range(30):  # ~150 sec max
             time.sleep(5)
 
             check = requests.get(
@@ -134,4 +141,3 @@ async def generate_image(file: UploadFile = File(...)):
             status_code=500,
             content={"error": "Server error", "details": str(e)}
         )
-
