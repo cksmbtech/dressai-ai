@@ -54,19 +54,19 @@ async def generate_image(file: UploadFile = File(...)):
         # PROMPT (BEAUTIFUL FACE + BODY)
         # =========================
         prompt = (
-            "A beautiful South Indian woman fashion model wearing an elegant saree, "
-            "graceful posture, symmetrical attractive face, clear smooth glowing skin, "
-            "soft feminine facial features, pleasant expression, "
-            "professional studio fashion photography, beauty lighting, "
-            "high realism, ultra-detailed fabric texture, "
-            "accurate saree draping, catalog quality, photorealistic"
-        )
-
-        negative_prompt = (
-            "ugly face, deformed face, bad anatomy, extra limbs, extra fingers, "
-            "crooked eyes, distorted facial features, blurry, low resolution, "
-            "cartoon, anime, unrealistic, bad hands, bad body proportions"
-        )
+              "Ultra realistic South Indian female fashion model wearing a silk saree "
+              "matching the uploaded reference image in color, fabric texture and border design. "
+              "Natural beautiful face, symmetrical features, smooth skin, elegant posture, "
+              "real human proportions, studio catalog photography, professional soft lighting, "
+              "DSLR photo, shallow depth of field, high fashion editorial style, "
+              "photorealistic, extremely detailed fabric folds, no artificial look"
+            )
+            
+            negative_prompt = (
+              "ugly face, distorted face, fake skin, doll-like, plastic skin, "
+              "anime, cartoon, illustration, cgi, unreal lighting, bad anatomy, "
+              "extra fingers, deformed body, blur, low quality, painting"
+            )
 
         payload = {
             "prompt": prompt,
@@ -134,3 +134,4 @@ async def generate_image(file: UploadFile = File(...)):
             status_code=500,
             content={"error": "Server error", "details": str(e)}
         )
+
