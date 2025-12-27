@@ -62,47 +62,69 @@ def gender_prompt(gender: str) -> str:
 @app.post("/generate")
 async def generate_image(
     file: UploadFile = File(...),
-    age_group: str = Form("20–30"),
-    gender: str = Form("Female")
+    age_group: str = "adult",
+    gender: str = "female"
 ):
     try:
-        # -------------------------
-        # Read uploaded image
-        # -------------------------
         image_bytes = await file.read()
         image_b64 = base64.b64encode(image_bytes).decode("utf-8")
 
-        age_desc = age_prompt(age_group)
-        gender_desc = gender_prompt(gender)
+        age_group = age_group.lower()
+        gender = gender.lower()
 
-        # -------------------------
-        # PROMPT (MATCH INPUT IMAGE)
-        # -------------------------
-        prompt = (
-            f"Ultra realistic South Indian {gender_desc} {age_desc} "
-            f"wearing a silk saree exactly matching the uploaded reference image. "
-            f"Accurate saree color, border design, fabric texture, weave pattern, "
-            f"and traditional draping style. "
-            f"Beautiful symmetrical face, natural skin texture, soft facial expression, "
-            f"realistic hands, arms, body proportions. "
-            f"Professional studio fashion photography, DSLR quality, "
-            f"soft diffused lighting, shallow depth of field, "
-            f"catalog fashion shoot, photorealistic, no artificial look."
-        )
+        # =========================
+        # DYNAMIC PROMPT LOGIC
+        # =========================
 
-        negative_prompt = (
-            "ugly face, distorted face, asymmetrical face, deformed features, "
-            "fake skin, plastic skin, doll-like, cgi, cartoon, anime, illustration, "
-            "painting, unrealistic lighting, bad anatomy, extra limbs, "
-            "extra fingers, missing fingers, malformed hands, "
-            "blurry, low resolution, low quality"
-        )
+        if gender == "male":
+            if "teen" in age_group:
+                prompt = (
+                    "Ultra realistic South Indian teenage boy wearing modern casual outfit "
+                    "such as a stylish shirt and jeans. Masculine face, youthful features, "
+                    "natural skin texture, realistic proportions, studio photography, "
+                    "DSLR photo, professional lighting, photorealistic."
+                )
+            else:
+                prompt = (
+                    "Ultra realistic South Indian male fashion model wearing traditional "
+                    "kurta or modern formal shirt and trousers. Handsome masculine face, "
+                    "natural expression, realistic body proportions, studio fashion photography, "
+                    "photorealistic, high detail."
+                )
 
+            negative_prompt = (
+                "female clothing, saree, lehenga, blouse, makeup, feminine face, "
+                "extra limbs, distorted face, cartoon, anime, cgi, unreal"
+            )
+
+        else:  # FEMALE
+            if "teen" in age_group:
+                prompt = (
+                    "Ultra realistic South Indian teenage girl wearing elegant modern ethnic "
+                    "or casual traditional outfit. Youthful beautiful face, natural skin, "
+                    "realistic body proportions, studio photography, photorealistic."
+                )
+            else:
+                prompt = (
+                    "Ultra realistic South Indian woman wearing elegant silk saree matching "
+                    "the uploaded reference image in color and fabric texture. Beautiful face, "
+                    "symmetrical features, smooth natural skin, professional studio lighting, "
+                    "DSLR fashion photography, photorealistic."
+                )
+
+            negative_prompt = (
+                "male body, beard, moustache, masculine face, cartoon, anime, cgi, "
+                "extra fingers, distorted body, fake skin"
+            )
+
+        # =========================
+        # STABLE HORDE PAYLOAD
+        # =========================
         payload = {
             "prompt": prompt,
             "params": {
                 "sampler_name": "k_euler",
-                "steps": 22,
+                "steps": 20,
                 "cfg_scale": 7,
                 "width": 512,
                 "height": 768,
@@ -113,9 +135,6 @@ async def generate_image(
             "source_image": image_b64
         }
 
-        # -------------------------
-        # SUBMIT TO STABLE HORDE
-        # -------------------------
         submit = requests.post(
             "https://stablehorde.net/api/v2/generate/async",
             headers=HORDE_HEADERS,
@@ -126,41 +145,25 @@ async def generate_image(
         if submit.status_code != 202:
             return JSONResponse(
                 status_code=500,
-                content={
-                    "error": "Stable Horde submit failed",
-                    "details": submit.json()
-                }
+                content={"error": "Stable Horde submit failed", "details": submit.json()}
             )
 
         request_id = submit.json()["id"]
 
-        # -------------------------
-        # POLL RESULT
-        # -------------------------
-        for _ in range(30):  # ~150 sec
+        for _ in range(30):
             time.sleep(5)
-
             check = requests.get(
                 f"https://stablehorde.net/api/v2/generate/status/{request_id}",
                 headers=HORDE_HEADERS
             )
-
             data = check.json()
 
             if data.get("done"):
-                generations = data.get("generations", [])
-                if generations:
-                    return {
-                        "image_base64": generations[0]["img"]
-                    }
+                gens = data.get("generations", [])
+                if gens:
+                    return {"image_base64": gens[0]["img"]}
 
-        return JSONResponse(
-            status_code=504,
-            content={"error": "AI generation timed out"}
-        )
+        return JSONResponse(status_code=504, content={"error": "AI generation timed out"})
 
     except Exception as e:
-        return JSONResponse(
-            status_code=500,
-            content={"error": "Server error", "details": str(e)}
-        )
+        return JSONResponse(status_code=500, content={"error": str(e)})
