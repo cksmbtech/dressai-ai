@@ -1,11 +1,10 @@
-from fastapi import FastAPI, UploadFile, File
+from fastapi import FastAPI, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 import requests
 import base64
 import time
-import io
-from PIL import Image
+import os
 
 app = FastAPI()
 
@@ -14,118 +13,120 @@ app = FastAPI()
 # =========================
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # you can restrict later
+    allow_origins=["*"],   # you can restrict later
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 # =========================
-# HEALTH CHECK (Render)
+# ENV VARIABLES
+# =========================
+STABLE_HORDE_API_KEY = os.getenv("STABLE_HORDE_API_KEY")
+
+if not STABLE_HORDE_API_KEY:
+    print("⚠️ WARNING: STABLE_HORDE_API_KEY not set")
+
+HORDE_HEADERS = {
+    "apikey": STABLE_HORDE_API_KEY,
+    "Client-Agent": "dressai/1.0 (cksmbtech.com)",
+    "Content-Type": "application/json"
+}
+
+# =========================
+# HEALTH CHECK
 # =========================
 @app.get("/healthz")
 def health():
     return {"status": "ok"}
 
 # =========================
-# STABLE HORDE CONFIG
-# =========================
-HORDE_API = "https://stablehorde.net/api/v2"
-CLIENT_AGENT = "dressai-demo/1.0"
-
-# =========================
-# AI GENERATE ENDPOINT
+# AI GENERATION ENDPOINT
 # =========================
 @app.post("/generate")
 async def generate_image(file: UploadFile = File(...)):
     try:
         image_bytes = await file.read()
-        img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+        image_b64 = base64.b64encode(image_bytes).decode("utf-8")
 
-        # Encode input image (reference only)
-        buffer = io.BytesIO()
-        img.save(buffer, format="PNG")
-        img_b64 = base64.b64encode(buffer.getvalue()).decode()
-
-        # =========================
-        # STRONG FASHION PROMPT
-        # =========================
+        # 🔥 PROMPT (BEAUTIFUL FACE + BODY)
         prompt = (
-            "A beautiful South Indian fashion model wearing an elegant traditional saree. "
-            "The saree fabric, color, and golden zari patterns closely match the uploaded reference image. "
-            "Graceful posture, proportional body, natural hands and fingers, smooth realistic skin, "
-            "beautiful symmetrical face, soft facial expression, professional studio fashion photography. "
-            "High-end fashion catalog style, accurate saree draping, realistic fabric folds, "
-            "cinematic lighting, sharp focus, ultra detailed, photorealistic."
+            "A beautiful South Indian woman fashion model wearing an elegant saree, "
+            "graceful posture, symmetrical attractive face, clear smooth skin, "
+            "natural expression, studio fashion photography, professional lighting, "
+            "high realism, detailed fabric texture, accurate saree draping, "
+            "photorealistic, catalog quality, ultra high detail"
         )
 
         negative_prompt = (
-            "ugly face, deformed face, bad anatomy, extra fingers, extra hands, extra limbs, "
-            "distorted body, cartoon, anime, blurry, low quality, oversharpened, harsh lighting"
+            "ugly face, deformed face, bad anatomy, extra limbs, extra fingers, "
+            "crooked eyes, distorted face, blurry, low quality, cartoon, anime, "
+            "overexposed, underexposed, bad hands, bad proportions"
         )
 
         payload = {
             "prompt": prompt,
-            "negative_prompt": negative_prompt,
             "params": {
                 "sampler_name": "k_euler",
-                "steps": 25,
+                "steps": 20,
                 "cfg_scale": 7,
                 "width": 512,
                 "height": 768,
+                "negative_prompt": negative_prompt
             },
             "nsfw": False,
-            "trusted_workers": False,
-            "models": ["Deliberate"],
-            "source_image": img_b64,
-        }
-
-        headers = {
-            "Content-Type": "application/json",
-            "Client-Agent": CLIENT_AGENT,
+            "trusted_workers": True,
+            "source_image": image_b64
         }
 
         # =========================
-        # SUBMIT JOB
+        # SUBMIT TO STABLE HORDE
         # =========================
         submit = requests.post(
-            f"{HORDE_API}/generate/async",
+            "https://stablehorde.net/api/v2/generate/async",
+            headers=HORDE_HEADERS,
             json=payload,
-            headers=headers,
-            timeout=30,
+            timeout=30
         )
 
-        submit_data = submit.json()
-        if "id" not in submit_data:
+        if submit.status_code != 202:
             return JSONResponse(
-                {"error": "Stable Horde submit failed", "details": submit_data},
                 status_code=500,
+                content={
+                    "error": "Stable Horde submit failed",
+                    "details": submit.json()
+                }
             )
 
-        job_id = submit_data["id"]
+        request_id = submit.json()["id"]
 
         # =========================
         # POLL RESULT
         # =========================
-        for _ in range(40):
-            time.sleep(3)
-            check = requests.get(f"{HORDE_API}/generate/status/{job_id}", timeout=30)
-            result = check.json()
+        for _ in range(30):
+            time.sleep(5)
 
-            if result.get("done"):
-                if result.get("generations"):
-                    image_url = result["generations"][0]["img"]
-                    return {"image_base64": image_url}
-                else:
-                    break
+            check = requests.get(
+                f"https://stablehorde.net/api/v2/generate/status/{request_id}",
+                headers=HORDE_HEADERS
+            )
+
+            data = check.json()
+
+            if data.get("done"):
+                generations = data.get("generations", [])
+                if generations:
+                    return {
+                        "image_base64": generations[0]["img"]
+                    }
 
         return JSONResponse(
-            {"error": "AI generation timed out"},
             status_code=504,
+            content={"error": "AI generation timed out"}
         )
 
     except Exception as e:
         return JSONResponse(
-            {"error": "Server error", "details": str(e)},
             status_code=500,
+            content={"error": "Server error", "details": str(e)}
         )
