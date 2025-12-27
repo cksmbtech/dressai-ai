@@ -1,116 +1,125 @@
 from fastapi import FastAPI, UploadFile, File
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from PIL import Image
-import io, requests, base64, time, os
-import numpy as np
+from fastapi.middleware.cors import CORSMiddleware
+import requests
+import base64
+import time
+import os
 
+# =========================
+# CONFIG
+# =========================
+HORDE_API_KEY = os.getenv("HORDE_API_KEY", zKW_0W2Zy9IK8sfAKXPKjQ
+HORDE_SUBMIT_URL = "https://stablehorde.net/api/v2/generate/async"
+HORDE_STATUS_URL = "https://stablehorde.net/api/v2/generate/status/"
+
+# =========================
+# APP INIT
+# =========================
 app = FastAPI()
 
-# -----------------------------
-# CORS (IMPORTANT)
-# -----------------------------
+# =========================
+# CORS (CRITICAL FOR BROWSER)
+# =========================
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "https://cksmbtech.com",
+        "https://www.cksmbtech.com",
+        "*"   # keep during demo; restrict later
+    ],
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+# =========================
+# HEALTH CHECK
+# =========================
 @app.get("/")
-def root():
+def health():
     return {"status": "DressAI API running"}
 
-# -----------------------------
-# IMAGE ANALYSIS
-# -----------------------------
-def extract_dominant_color(image: Image.Image):
-    image = image.resize((100, 100))
-    arr = np.array(image)
-    avg = arr.mean(axis=(0, 1))
-
-    r, g, b = avg
-    if r > g and r > b:
-        return "red"
-    if g > r and g > b:
-        return "green"
-    if b > r and b > g:
-        return "blue"
-    return "multicolor"
-
-def build_prompt(color: str):
-    return f"""
-Ultra realistic studio photograph of a South Indian female fashion model,
-wearing a {color} traditional Indian silk saree with gold zari detailing,
-inspired by South Indian wedding wear.
-Elegant drape, realistic fabric folds, high detail textile texture,
-neutral studio background, soft professional lighting,
-fashion catalog photography, photorealistic, sharp focus.
-"""
-
-NEGATIVE_PROMPT = """
-cartoon, anime, illustration, low quality, bad anatomy,
-extra limbs, distorted face, western gown, suit, jeans,
-blurry, cropped, watermark, logo, text
-"""
-
-# -----------------------------
-# AI GENERATION (STABLE HORDE)
-# -----------------------------
+# =========================
+# GENERATE AI PREVIEW
+# =========================
 @app.post("/generate")
 async def generate(file: UploadFile = File(...)):
 
-    image_bytes = await file.read()
-    image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+    try:
+        # Read uploaded image
+        image_bytes = await file.read()
+        image_b64 = base64.b64encode(image_bytes).decode()
 
-    color = extract_dominant_color(image)
-    prompt = build_prompt(color)
-
-    payload = {
-        "prompt": prompt,
-        "params": {
-            "sampler_name": "k_euler",
-            "steps": 25,
-            "cfg_scale": 7,
-            "width": 512,
-            "height": 768,
-            "negative_prompt": NEGATIVE_PROMPT
-        },
-        "nsfw": False,
-        "models": ["stable_diffusion"],
-    }
-
-    headers = {
-        "Content-Type": "application/json",
-        "apikey": "zKW_0W2Zy9IK8sfAKXPKjQ"  # anonymous stable horde
-    }
-
-    submit = requests.post(
-        "https://stablehorde.net/api/v2/generate/async",
-        json=payload,
-        headers=headers
-    ).json()
-
-    if "id" not in submit:
-        return JSONResponse(
-            {"error": "Stable Horde submit failed", "details": submit},
-            status_code=500
+        # Prompt (you can tune later)
+        prompt = (
+            "A professional fashion model wearing a dress inspired by the uploaded image. "
+            "Studio lighting, realistic fabric texture, high quality fashion photography, "
+            "neutral background, full body, realistic proportions."
         )
 
-    job_id = submit["id"]
+        # -------------------------
+        # SUBMIT TO STABLE HORDE
+        # -------------------------
+        submit_response = requests.post(
+            HORDE_SUBMIT_URL,
+            headers={
+                "apikey": HORDE_API_KEY,
+                "Content-Type": "application/json"
+            },
+            json={
+                "prompt": prompt,
+                "params": {
+                    "width": 512,
+                    "height": 512,
+                    "steps": 15,
+                    "sampler_name": "k_euler"
+                },
+                "models": ["stable_diffusion"],
+                "nsfw": False,
+                "slow_workers": True
+            },
+            timeout=30
+        )
 
-    # Poll result
-    for _ in range(25):
-        time.sleep(5)
-        check = requests.get(
-            f"https://stablehorde.net/api/v2/generate/status/{job_id}"
-        ).json()
+        if submit_response.status_code != 202:
+            return JSONResponse({
+                "error": "Stable Horde submit failed",
+                "details": submit_response.text
+            }, status_code=500)
 
-        if check.get("done") and check.get("generations"):
-            img_url = check["generations"][0]["img"]
-            return {"image_base64": img_url}
+        job_id = submit_response.json().get("id")
 
-    return JSONResponse(
-        {"error": "AI generation timed out"},
-        status_code=504
-    )
+        # -------------------------
+        # POLL FOR RESULT
+        # -------------------------
+        for _ in range(24):  # ~2 minutes max
+            time.sleep(5)
+
+            status_response = requests.get(
+                HORDE_STATUS_URL + job_id,
+                timeout=30
+            ).json()
+
+            if status_response.get("done"):
+                generations = status_response.get("generations", [])
+
+                if not generations:
+                    return JSONResponse({
+                        "error": "No image generated"
+                    }, status_code=500)
+
+                # Stable Horde returns a public image URL
+                return JSONResponse({
+                    "image_base64": generations[0]["img"]
+                })
+
+        return JSONResponse({
+            "error": "AI generation timed out"
+        }, status_code=504)
+
+    except Exception as e:
+        return JSONResponse({
+            "error": "Server error",
+            "details": str(e)
+        }, status_code=500)
